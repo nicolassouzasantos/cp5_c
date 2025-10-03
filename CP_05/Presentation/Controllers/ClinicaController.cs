@@ -1,185 +1,125 @@
-﻿using CP_05.Application.Interfaces;
+using CP_05.Application.Common;
+using CP_05.Application.Dtos.Clinica;
+using CP_05.Application.Dtos.Profissional;
+using CP_05.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Swashbuckle.AspNetCore.Annotations;
 
-namespace CP_05.Presentation.Controllers
+namespace CP_05.Presentation.Controllers;
+
 [ApiController]
 [Route("api/[controller]")]
-public class ClinicasController(AppDbContext db) : ControllerBase
+public class ClinicasController(IClinicaUseCase useCase) : ControllerBase
 {
-    // GET: /api/clinicas
+    private readonly IClinicaUseCase _useCase = useCase;
+
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ClinicaReadDto>>> GetAll()
+    [SwaggerOperation(Summary = "Lista todas as clínicas cadastradas.")]
+    [ProducesResponseType(typeof(IEnumerable<ClinicaReadDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
     {
-        var clinicas = await db.Clinicas
-            .Include(c => c.Endereco)
-            .Include(c => c.Profissionais)
-            .ToListAsync();
-
-        var result = clinicas.Select(MapToReadDto).ToList();
-        return Ok(result); // 200
+        var result = await _useCase.GetAllAsync(cancellationToken);
+        return Ok(result.Data);
     }
 
-    // GET: /api/clinicas/{id}
     [HttpGet("{id:int}")]
-    public async Task<ActionResult<ClinicaReadDto>> GetById(int id)
+    [SwaggerOperation(Summary = "Busca uma clínica pelo identificador único.")]
+    [ProducesResponseType(typeof(ClinicaReadDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetById(int id, CancellationToken cancellationToken)
     {
-        var clinica = await db.Clinicas
-            .Include(c => c.Endereco)
-            .Include(c => c.Profissionais)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        if (clinica is null) return NotFound(); // 404
-        return Ok(MapToReadDto(clinica)); // 200
+        var result = await _useCase.GetByIdAsync(id, cancellationToken);
+        return result.IsSuccess ? Ok(result.Data) : HandleFailure(result);
     }
 
-    // POST: /api/clinicas
     [HttpPost]
-    public async Task<ActionResult<ClinicaReadDto>> Create([FromBody] ClinicaCreateDto dto)
+    [SwaggerOperation(Summary = "Cria uma nova clínica." )]
+    [ProducesResponseType(typeof(ClinicaReadDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Create([FromBody] ClinicaCreateDto dto, CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid) return ValidationProblem(ModelState); // 400
-
-        var clinica = new Clinica
+        if (!ModelState.IsValid)
         {
-            Nome = dto.Nome,
-            Email = dto.Email,
-            Telefone = dto.Telefone
-        };
-
-        if (dto.Endereco is not null)
-        {
-            clinica.Endereco = new Endereco
-            {
-                Rua = dto.Endereco.Rua,
-                Numero = dto.Endereco.Numero,
-                Bairro = dto.Endereco.Bairro,
-                CEP = dto.Endereco.CEP
-            };
+            return ValidationProblem(ModelState);
         }
 
-        db.Clinicas.Add(clinica);
-        await db.SaveChangesAsync();
-
-        var read = MapToReadDto(clinica);
-        return CreatedAtAction(nameof(GetById), new { id = clinica.Id }, read); // 201
+        var result = await _useCase.CreateAsync(dto, cancellationToken);
+        return result.IsSuccess
+            ? CreatedAtAction(nameof(GetById), new { id = result.Data!.Id }, result.Data)
+            : HandleFailure(result);
     }
 
-    // PUT: /api/clinicas/{id}
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] ClinicaUpdateDto dto)
+    [SwaggerOperation(Summary = "Atualiza os dados de uma clínica existente.")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Update(int id, [FromBody] ClinicaUpdateDto dto, CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid) return ValidationProblem(ModelState);
-
-        var clinica = await db.Clinicas
-            .Include(c => c.Endereco)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        if (clinica is null) return NotFound(); // 404
-
-        clinica.Nome = dto.Nome;
-        clinica.Email = dto.Email;
-        clinica.Telefone = dto.Telefone;
-
-        if (dto.Endereco is null)
+        if (!ModelState.IsValid)
         {
-            if (clinica.Endereco is not null) db.Enderecos.Remove(clinica.Endereco);
-        }
-        else
-        {
-            if (clinica.Endereco is null)
-            {
-                clinica.Endereco = new Endereco
-                {
-                    Rua = dto.Endereco.Rua,
-                    Numero = dto.Endereco.Numero,
-                    Bairro = dto.Endereco.Bairro,
-                    CEP = dto.Endereco.CEP
-                };
-            }
-            else
-            {
-                clinica.Endereco.Rua = dto.Endereco.Rua;
-                clinica.Endereco.Numero = dto.Endereco.Numero;
-                clinica.Endereco.Bairro = dto.Endereco.Bairro;
-                clinica.Endereco.CEP = dto.Endereco.CEP;
-            }
+            return ValidationProblem(ModelState);
         }
 
-        await db.SaveChangesAsync();
-        return NoContent(); // 204
+        var result = await _useCase.UpdateAsync(id, dto, cancellationToken);
+        return result.IsSuccess ? NoContent() : HandleFailure(result);
     }
 
-    // DELETE: /api/clinicas/{id}
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
+    [SwaggerOperation(Summary = "Remove uma clínica do cadastro.")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        var clinica = await db.Clinicas.FindAsync(id);
-        if (clinica is null) return NotFound(); // 404
-
-        db.Clinicas.Remove(clinica);
-        await db.SaveChangesAsync();
-        return NoContent(); // 204
+        var result = await _useCase.DeleteAsync(id, cancellationToken);
+        return result.IsSuccess ? NoContent() : HandleFailure(result);
     }
 
-    // ===== Métodos extras exigidos =====
-
-    // POST: /api/clinicas/{clinicaId}/profissionais
-    // Adicionar profissional passando IdClinica
     [HttpPost("{clinicaId:int}/profissionais")]
-    public async Task<ActionResult<ProfissionalReadDto>> AdicionarProfissional(int clinicaId, [FromBody] ProfissionalCreateDto dto)
+    [SwaggerOperation(Summary = "Adiciona um profissional à clínica informada.")]
+    [ProducesResponseType(typeof(ProfissionalReadDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> AdicionarProfissional(int clinicaId, [FromBody] ProfissionalCreateDto dto, CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid) return ValidationProblem(ModelState);
-
-        var clinica = await db.Clinicas.FindAsync(clinicaId);
-        if (clinica is null) return NotFound(); // 404
-
-        var prof = new Profissional
+        if (!ModelState.IsValid)
         {
-            Nome = dto.Nome,
-            Email = dto.Email,
-            Idade = dto.Idade,
-            Cargo = dto.Cargo,
-            ClinicaId = clinicaId
-        };
+            return ValidationProblem(ModelState);
+        }
 
-        db.Profissionais.Add(prof);
-        await db.SaveChangesAsync();
-
-        var read = new ProfissionalReadDto(prof.Id, prof.Nome, prof.Email, prof.Idade, prof.Cargo, prof.ClinicaId);
-        return Created($"/api/clinicas/{clinicaId}/profissionais/{prof.Id}", read); // 201
+        var result = await _useCase.AddProfissionalAsync(clinicaId, dto, cancellationToken);
+        return result.IsSuccess
+            ? CreatedAtAction(nameof(GetById), new { id = clinicaId }, result.Data)
+            : HandleFailure(result);
     }
 
-    // PUT: /api/clinicas/{clinicaId}/profissionais/{profissionalId}
-    // Editar profissional passando IdProfissional e IdClinica
     [HttpPut("{clinicaId:int}/profissionais/{profissionalId:int}")]
-    public async Task<IActionResult> EditarProfissional(int clinicaId, int profissionalId, [FromBody] ProfissionalUpdateDto dto)
+    [SwaggerOperation(Summary = "Atualiza um profissional vinculado à clínica informada.")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> EditarProfissional(int clinicaId, int profissionalId, [FromBody] ProfissionalUpdateDto dto, CancellationToken cancellationToken)
     {
-        if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
 
-        // Garante que a clínica exista
-        var clinica = await db.Clinicas.FindAsync(clinicaId);
-        if (clinica is null) return NotFound(); // 404
-
-        var prof = await db.Profissionais.FirstOrDefaultAsync(p => p.Id == profissionalId && p.ClinicaId == clinicaId);
-        if (prof is null) return NotFound(); // 404 (não pertence à clínica informada)
-
-        prof.Nome = dto.Nome;
-        prof.Email = dto.Email;
-        prof.Idade = dto.Idade;
-        prof.Cargo = dto.Cargo;
-
-        await db.SaveChangesAsync();
-        return NoContent(); // 204
+        var result = await _useCase.UpdateProfissionalAsync(clinicaId, profissionalId, dto, cancellationToken);
+        return result.IsSuccess ? NoContent() : HandleFailure(result);
     }
 
-    private static ClinicaReadDto MapToReadDto(Clinica c)
+    private ActionResult HandleFailure(OperationResult result)
     {
-        var end = c.Endereco is null ? null :
-            new EnderecoReadDto(c.Endereco.Id, c.Endereco.Rua, c.Endereco.Numero, c.Endereco.Bairro, c.Endereco.CEP);
-
-        var profs = c.Profissionais
-            .Select(p => new ProfissionalReadDto(p.Id, p.Nome, p.Email, p.Idade, p.Cargo, p.ClinicaId))
-            .ToList();
-
-        return new ClinicaReadDto(c.Id, c.Nome, c.Email, c.Telefone, end, profs);
+        var payload = new { result.Errors };
+        return result.ErrorType switch
+        {
+            OperationErrorType.NotFound => NotFound(payload),
+            OperationErrorType.Validation => BadRequest(payload),
+            OperationErrorType.Conflict => Conflict(payload),
+            _ => StatusCode(StatusCodes.Status500InternalServerError, payload)
+        };
     }
+
+    private ActionResult HandleFailure<T>(OperationResult<T> result) => HandleFailure((OperationResult)result);
 }
